@@ -1,0 +1,13 @@
+[package]
+name = "sielo-core"
+version = "0.1.0"
+authors = ["citorva <duet.venceslas@orange.fr>"]
+edition = "2018"
+
+[dependencies]
+zmq = "0.9"
+sqlite = "0.25.0"
+toml = "0.5.3"
+#openssl = "0.10.24"
+arguments = "0.6.2"
+url = "2.1.0"
