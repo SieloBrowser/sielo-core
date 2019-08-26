@@ -11,3 +11,4 @@
 //!  * [Modules management]() using OpenSSL and SQLite.
 
 pub mod history;
+pub mod db;
