@@ -204,6 +204,98 @@ impl SQLite {
         }
         return Err(Error { code: None, message: None });
     }
+
+    fn create_table(&mut self,
+                    name : &String,
+                    fields : &Vec<(String, &FieldType, &[FieldParameter])>,
+                    strict : bool) -> Result<(), Error> {
+        let mut first = true;
+        let mut primary_key = None;
+        let mut pk_decl_later = false;
+        let mut com = format!("CREATE TABLE {} (",
+                              match Self::convert_format(name.as_str(), strict) {
+                                  Ok(t) => t,
+                                  Err(e) => return Err(e),
+                              }
+        );
+        for i in fields {
+            if !first {
+                com += ",";
+            }
+            let ret = match Self::make_field_command(i.0.as_str(),
+                                                     i.1,
+                                                     i.2,
+                                                     strict) {
+                Ok(value) => value,
+                Err(e) => return Err(e),
+            };
+
+            com += ret.0.as_str();
+
+            if ret.1 == 1 {
+                if primary_key != None {
+                    return Err(Error {
+                        code: Some(1004),
+                        message: Some(String::from("Multiple declaration of primary key"))
+                    })
+                } else {
+                    primary_key = Some(i.0.clone());
+                    pk_decl_later = false;
+                }
+            } else if ret.1 == 2 {
+                if primary_key != None {
+                    return Err(Error {
+                        code: Some(1004),
+                        message: Some(String::from("Multiple declaration of primary key"))
+                    })
+                } else {
+                    primary_key = Some(i.0.clone());
+                    pk_decl_later = true;
+                }
+            }
+
+            first = false;
+        }
+        if pk_decl_later {
+            if let Some(pk) = primary_key {
+                com += format!(",PRIMARY KEY({})", Self::use_correct_format(pk.as_str())).as_str();
+            }
+        }
+        com += ");";
+        println!("{}", com);
+        if let Err(e) = self.db.execute(com) {
+            return Err(Error { code: e.code, message: e.message });
+        }
+        return Ok(());
+    }
+
+    fn make_correct_format(&mut self,
+                           name : &String,
+                           fields : &Vec<(String, &FieldType, &[FieldParameter])>,
+                           strict : bool) -> Result<(), Error> {
+        let mut future = name.clone();
+        loop {
+            match self.have_table(future.as_str()) {
+                Ok(t) => if t { break; },
+                Err(e) => return Err(e),
+            }
+            future = format!("_{}", future);
+        }
+
+        if let Err(e) = self.db.execute(format!("ALTER TABLE {} RENAME TO {};", name, future)) {
+            return Err(Error {code: e.code, message: e.message});
+        }
+
+        if let Err(e) = self.create_table(&name, &fields, strict) {
+            return Err(e);
+        }
+
+        if let Err(e) = self.db.execute(format!("INSERT INTO {} SELECT * FROM {};DROP TABLE {}", name, future, future)) {
+            return Err(Error {code: e.code, message: e.message});
+        }
+
+        Ok(())
+    }
 }
 
 impl TableProvider for SQLite {
@@ -237,17 +329,16 @@ impl TableProvider for SQLite {
                 if t {
                     match self.check_fields(name.as_str()) {
                         Ok(t) => {
-                            for i in fields {
+                            for i in &fields {
                                 if t.contains_key(i.0.as_str()) {
                                     let val = &t[i.0.as_str()];
                                     if &val.0 == i.1 {
                                         if !i.2.contains(&FieldParameter::NoNull) && val.1.contains(&FieldParameter::NoNull) {
-                                            println!("Warning: field {} cannot be null instead of the program wish", i.0);
+                                            self.make_correct_format(&name, &fields, strict);
                                         }
                                     } else {
                                         // The type is not the one expected.
-                                        // TODO: Add support of type modifier
-                                        unimplemented!();
+                                        self.make_correct_format(&name, &fields, strict);
                                     }
                                 } else {
                                     // Field doesn't exist, create it
@@ -269,64 +360,7 @@ impl TableProvider for SQLite {
                         Err(e) => return Err(e),
                     }
                 } else {
-                    // Create table from scratch
-                    let mut first = true;
-                    let mut primary_key = None;
-                    let mut pk_decl_later = false;
-                    let mut com = format!("CREATE TABLE {} (",
-                        match Self::convert_format(name.as_str(), strict) {
-                            Ok(t) => t,
-                            Err(e) => return Err(e),
-                        }
-                    );
-                    for i in fields {
-                        if !first {
-                            com += ",";
-                        }
-                        let ret = match Self::make_field_command(i.0.as_str(),
-                                                                 i.1,
-                                                                 i.2,
-                                                                 strict) {
-                            Ok(value) => value,
-                            Err(e) => return Err(e),
-                        };
-
-                        com += ret.0.as_str();
-
-                        if ret.1 == 1 {
-                            if primary_key != None {
-                                return Err(Error {
-                                    code: Some(1004),
-                                    message: Some(String::from("Multiple declaration of primary key"))
-                                })
-                            } else {
-                                primary_key = Some(i.0);
-                                pk_decl_later = false;
-                            }
-                        } else if ret.1 == 2 {
-                            if primary_key != None {
-                                return Err(Error {
-                                    code: Some(1004),
-                                    message: Some(String::from("Multiple declaration of primary key"))
-                                })
-                            } else {
-                                primary_key = Some(i.0);
-                                pk_decl_later = true;
-                            }
-                        }
-
-                        first = false;
-                    }
-                    if pk_decl_later {
-                        if let Some(pk) = primary_key {
-                            com += format!(",PRIMARY KEY({})", Self::use_correct_format(pk.as_str())).as_str();
-                        }
-                    }
-                    com += ");";
-                    println!("{}", com);
-                    if let Err(e) = self.db.execute(com) {
-                        return Err(Error { code: e.code, message: e.message });
-                    }
+                    self.create_table(&name, &fields, strict);
                 }
             },
             Err(e) => return Err(e),

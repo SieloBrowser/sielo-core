@@ -13,12 +13,11 @@ fn main() {
         ("id", &FieldType::Integer, &[FieldParameter::AutoIncrement]),
         ("mime_type", &FieldType::Text, &[FieldParameter::Default(String::from("sielo/unknown"))]),
         ("url", &FieldType::Text, &[FieldParameter::NoNull]),
-        ("date", &FieldType::Integer, &[FieldParameter::Default(String::from("0"))]),
+        ("date", &FieldType::Text, &[FieldParameter::Default(String::from("0"))]),
         ("title", &FieldType::Text, &[FieldParameter::Default(String::new())]),
         ("favicon", &FieldType::Blob, &[]),
         ("parent", &FieldType::Integer, &[]),
         ("children", &FieldType::Blob, &[]),
-        ("profile", &FieldType::Text, &[]),
     ], false, false) {
         Ok(t) => (),
         Err(e) => {
