@@ -64,10 +64,7 @@ impl SQLite {
                   strict : bool) -> Result<(String, u8), Error> {
         let mut primary = 0;
         Ok((format!("{} {}{}",
-              match Self::convert_format(name, strict) {
-                  Ok(t) => t,
-                  Err(e) => return Err(e),
-              },
+              name,
               match field_t {
                   FieldType::Text => "TEXT",
                   FieldType::Real => "REAL",
@@ -133,12 +130,8 @@ impl SQLite {
 
     fn check_fields(&mut self, name : &str)
             -> Result<HashMap<String,(FieldType, Vec<FieldParameter>)>, Error> {
-        match self.db.prepare("PRAGMA table_info(?)") {
+        match self.db.prepare(&*format!("PRAGMA table_info({})", Self::convert_format(name,false).ok().unwrap())) {
             Ok(mut t) => {
-                if let Err(e) = t.bind(1, name) {
-                    return Err(Error { code: e.code, message: e.message });
-                }
-
                 let mut ret = HashMap::<String,(FieldType, Vec<FieldParameter>)>::new();
 
                 loop {
@@ -188,18 +181,18 @@ impl SQLite {
                         }
                         Err(e) => return Err(Error { code: e.code, message: e.message }),
                     } {
-                        let mut topush = vec!(FieldParameter::Unique, FieldParameter::AutoIncrement, FieldParameter::PrimaryKey);
-                        tags.append(&mut topush);
+                        tags.push(FieldParameter::PrimaryKey);
                     }
 
                     // Have default value or not
-                    let v = match t.read::<String>(4) {
+                    match t.read::<String>(4) {
                         Ok(t) => {
-                            t
+                            tags.push(FieldParameter::Default(t));
                         }
-                        Err(e) => return Err(Error { code: e.code, message: e.message }),
+                        Err(e) => if e.code.is_some() {
+                            return Err(Error { code: e.code, message: e.message })
+                        },
                     };
-                    println!("{}", v);
 
                     ret.insert(name, (tp, tags));
                 }
@@ -222,17 +215,66 @@ impl TableProvider for SQLite {
                  fields : &[(&str, &FieldType, &[FieldParameter])],
                  auto_create_field : bool,
                  strict : bool) -> Result<(), Error> {
-        match self.have_table(name) {
+        let name = match Self::convert_format(name, strict) {
+            Ok(t) => t,
+            Err(e) => return Err(e),
+        };
+        let fields = {
+            let mut ret = Vec::<(String, &FieldType, &[FieldParameter])>
+                ::with_capacity(fields.len());
+
+            for i in fields {
+                ret.push((match Self::convert_format(i.0, strict) {
+                    Ok(t) => t,
+                    Err(e) => return Err(e),
+                }, i.1, i.2));
+            }
+
+            ret
+        };
+        match self.have_table(name.as_str()) {
             Ok(t) => {
                 if t {
-
+                    match self.check_fields(name.as_str()) {
+                        Ok(t) => {
+                            for i in fields {
+                                if t.contains_key(i.0.as_str()) {
+                                    let val = &t[i.0.as_str()];
+                                    if &val.0 == i.1 {
+                                        if !i.2.contains(&FieldParameter::NoNull) && val.1.contains(&FieldParameter::NoNull) {
+                                            println!("Warning: field {} cannot be null instead of the program wish", i.0);
+                                        }
+                                    } else {
+                                        // The type is not the one expected.
+                                        // TODO: Add support of type modifier
+                                        unimplemented!();
+                                    }
+                                } else {
+                                    // Field doesn't exist, create it
+                                    let com = format!("ALTER TABLE {} ADD COLUMN {}",
+                                                      name,
+                                                      match Self::make_field_command(i.0.as_str(),
+                                                                                     i.1,
+                                                                                     i.2,
+                                                                                     strict) {
+                                                          Ok(t) => t.0,
+                                                          Err(e) => return Err(e),
+                                                      });
+                                    if let Err(e) = self.db.execute(com) {
+                                        return Err(Error { code: e.code, message: e.message });
+                                    }
+                                }
+                            }
+                        },
+                        Err(e) => return Err(e),
+                    }
                 } else {
                     // Create table from scratch
                     let mut first = true;
                     let mut primary_key = None;
                     let mut pk_decl_later = false;
                     let mut com = format!("CREATE TABLE {} (",
-                        match Self::convert_format(name, strict) {
+                        match Self::convert_format(name.as_str(), strict) {
                             Ok(t) => t,
                             Err(e) => return Err(e),
                         }
@@ -241,7 +283,10 @@ impl TableProvider for SQLite {
                         if !first {
                             com += ",";
                         }
-                        let ret = match Self::make_field_command(i.0, i.1, i.2, strict) {
+                        let ret = match Self::make_field_command(i.0.as_str(),
+                                                                 i.1,
+                                                                 i.2,
+                                                                 strict) {
                             Ok(value) => value,
                             Err(e) => return Err(e),
                         };
@@ -274,7 +319,7 @@ impl TableProvider for SQLite {
                     }
                     if pk_decl_later {
                         if let Some(pk) = primary_key {
-                            com += format!(",PRIMARY KEY({})", Self::use_correct_format(pk)).as_str();
+                            com += format!(",PRIMARY KEY({})", Self::use_correct_format(pk.as_str())).as_str();
                         }
                     }
                     com += ");";

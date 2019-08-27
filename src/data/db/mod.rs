@@ -13,6 +13,7 @@ use std::borrow::Borrow;
 
 pub mod sqlite;
 
+#[derive(Eq, PartialEq, Debug)]
 pub enum FieldType {
     Integer,
     Real,
@@ -21,6 +22,7 @@ pub enum FieldType {
     Unknown,
 }
 
+#[derive(Debug)]
 pub enum FieldValue<'a> {
     Integer(i64),
     Real(f64),
@@ -28,7 +30,7 @@ pub enum FieldValue<'a> {
     Blob(&'a [u8]),
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum FieldParameter {
     PrimaryKey,
     NoNull,
@@ -37,10 +39,12 @@ pub enum FieldParameter {
     Default(String),
 }
 
+#[derive(Debug)]
 pub struct Error {
     code : Option<isize>,
     message : Option<String>,
 }
+
 
 pub trait TableProvider {
     type TableProviderType : TableProvider;
