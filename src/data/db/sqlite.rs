@@ -8,8 +8,9 @@
 extern crate sqlite;
 
 use std::collections::hash_map::HashMap;
-use super::{ Error, TableProvider, FieldType, FieldParameter };
+use super::{ Error, TableProvider, FieldType, FieldParameter, FieldValue };
 use crate::data::history::Field;
+use crate::data::db::FieldType::Integer;
 
 pub struct SQLite {
     db : sqlite::Connection,
@@ -369,8 +370,71 @@ impl TableProvider for SQLite {
     }
 
     fn request(&mut self, req : &str, arguments : &[&str])
-               -> Result<Vec<HashMap<String,String>>, Error>
-    {
-        return Err(Error { code: None, message: None });
+               -> Result<Vec<HashMap<String,Option<FieldValue>>>, Error> {
+        match self.db.prepare(req) {
+            Ok(mut statement) => {
+                for i in 0..arguments.len() {
+                    if let Err(e) = statement.bind(i, arguments[i]) {
+                        return Err(Error { code: e.code, message: e.message});
+                    }
+                }
+                let mut ret = Vec::<HashMap<String,Option<FieldValue>>>::new();
+
+                loop {
+                    match statement.next() {
+                        Ok(val) => {
+                            if let sqlite::State::Done = val {
+                                break;
+                            }
+                        },
+                        Err(e) => return Err(Error { code: e.code, message: e.message}),
+                    }
+
+                    let mut vals = HashMap::<String,Option<FieldValue>>::with_capacity(statement.count());
+
+                    for i in 0..statement.count() {
+                        let to_add_name = statement.name(i);
+                        let to_add_value = match statement.kind(i) {
+                            sqlite::Type::String => {
+                                let tmp = match statement.read::<String>(i) {
+                                    Ok(t) => t,
+                                    Err(e) => return Err(Error { code: e.code, message: e.message }),
+                                };
+                                Some(FieldValue::Text(tmp))
+                            },
+                            sqlite::Type::Integer => {
+                                let tmp = match statement.read::<i64>(i) {
+                                    Ok(t) => t,
+                                    Err(e) => return Err(Error { code: e.code, message: e.message }),
+                                };
+                                Some(FieldValue::Integer(tmp))
+                            },
+                            sqlite::Type::Float => {
+                                let tmp = match statement.read::<f64>(i) {
+                                    Ok(t) => t,
+                                    Err(e) => return Err(Error { code: e.code, message: e.message }),
+                                };
+                                Some(FieldValue::Real(tmp))
+                            },
+                            sqlite::Type::Binary => {
+                                let tmp = match statement.read::<Vec<u8>>(i) {
+                                    Ok(t) => t,
+                                    Err(e) => return Err(Error { code: e.code, message: e.message }),
+                                };
+                                Some(FieldValue::Blob(tmp))
+                            },
+                            sqlite::Type::Null => None,
+                        };
+
+                        vals.insert(String::from(to_add_name), to_add_value);
+                    }
+
+                    ret.push(vals);
+                }
+
+                return Ok(ret);
+            },
+            Err(e) => return Err(Error { code: e.code, message: e.message}),
+        }
     }
 }

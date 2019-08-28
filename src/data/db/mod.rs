@@ -23,11 +23,11 @@ pub enum FieldType {
 }
 
 #[derive(Debug)]
-pub enum FieldValue<'a> {
+pub enum FieldValue {
     Integer(i64),
     Real(f64),
-    Text(&'a str),
-    Blob(&'a [u8]),
+    Text(String),
+    Blob(Vec<u8>),
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -57,7 +57,7 @@ pub trait TableProvider {
                   strict : bool) -> Result<(), Error>;
 
     fn request(&mut self, req : &str, arguments : &[&str])
-               -> Result<Vec<HashMap<String,String>>, Error>;
+        -> Result<Vec<HashMap<String,Option<FieldValue>>>, Error>;
 
     fn use_correct_format(val : &str) -> bool {
         const LETTER_RANGE : (&u8,&u8) = (&97u8, &122u8);
